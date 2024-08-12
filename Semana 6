@@ -1,0 +1,291 @@
+Semana 6
+
+# app.py
+from flask import Flask, request, redirect, url_for, render_template, flash
+import redis
+import json
+import uuid
+
+app = Flask(__name__)
+app.secret_key = 'your_secret_key'  # Cambia esto por una clave secreta en producción
+
+# Conexión a Redis
+try:
+    client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+    client.ping()  # Verificar si Redis está corriendo
+except redis.exceptions.ConnectionError:
+    print("Error: No se puede conectar a Redis. Asegúrese de que el servidor Redis esté ejecutándose.")
+    exit(1)
+
+# Función para agregar una receta
+def agregar_receta(nombre, ingredientes, pasos):
+    receta_id = str(uuid.uuid4())  # Genera un ID único para la receta
+    
+    receta = {
+        "nombre": nombre,
+        "ingredientes": ingredientes,
+        "pasos": pasos
+    }
+    
+    try:
+        # Almacenar la receta como un JSON
+        client.set(f"receta:{receta_id}", json.dumps(receta))
+    except Exception as e:
+        print(f"Error al agregar la receta: {e}")
+
+# Función para actualizar una receta existente
+def actualizar_receta(receta_id, nuevo_nombre=None, nuevos_ingredientes=None, nuevos_pasos=None):
+    receta_json = client.get(f"receta:{receta_id}")
+    
+    if not receta_json:
+        return "Error: Receta no encontrada."
+    
+    try:
+        receta = json.loads(receta_json)
+        
+        if nuevo_nombre:
+            receta['nombre'] = nuevo_nombre
+        
+        if nuevos_ingredientes is not None:
+            receta['ingredientes'] = nuevos_ingredientes
+        
+        if nuevos_pasos is not None:
+            receta['pasos'] = nuevos_pasos
+        
+        # Guardar los cambios
+        client.set(f"receta:{receta_id}", json.dumps(receta))
+        return "Receta actualizada exitosamente."
+    except (TypeError, json.JSONDecodeError) as e:
+        print(f"Error al actualizar la receta: {e}")
+        return "Error al actualizar la receta."
+
+# Función para eliminar una receta
+def eliminar_receta(receta_id):
+    if client.delete(f"receta:{receta_id}") == 0:
+        return "Error: Receta no encontrada."
+    else:
+        return "Receta eliminada exitosamente."
+
+# Función para listar todas las recetas
+def listar_recetas():
+    recetas_keys = client.keys("receta:*")
+    
+    if not recetas_keys:
+        return []
+
+    recetas = []
+    for key in recetas_keys:
+        receta_json = client.get(key)
+        try:
+            receta = json.loads(receta_json)
+            receta_id = key.split(":")[1]
+            recetas.append((receta_id, receta["nombre"]))
+        except (TypeError, json.JSONDecodeError) as e:
+            print(f"Error al recuperar la receta {key}: {e}")
+    
+    return recetas
+
+# Función para buscar una receta por ID
+def buscar_receta(receta_id):
+    receta_json = client.get(f"receta:{receta_id}")
+    
+    if not receta_json:
+        return None, []
+
+    try:
+        receta = json.loads(receta_json)
+        return receta, list(zip(receta['ingredientes'], receta['pasos']))
+    except (TypeError, json.JSONDecodeError) as e:
+        print(f"Error al recuperar la receta: {e}")
+        return None, []
+
+@app.route('/')
+def index():
+    recetas = listar_recetas()
+    return render_template('index.html', recetas=recetas)
+
+@app.route('/agregar', methods=['GET', 'POST'])
+def agregar():
+    if request.method == 'POST':
+        nombre = request.form['nombre']
+        ingredientes = request.form.getlist('ingredientes')
+        pasos = request.form.getlist('pasos')
+        if not ingredientes:
+            ingredientes = []  # Asegúrate de que ingredientes sea una lista vacía si está vacío
+        if not pasos:
+            pasos = []  # Asegúrate de que pasos sea una lista vacía si está vacío
+        agregar_receta(nombre, ingredientes, pasos)
+        flash('Receta agregada exitosamente.')
+        return redirect(url_for('index'))
+    return render_template('agregar.html')
+
+@app.route('/actualizar/<receta_id>', methods=['GET', 'POST'])
+def actualizar(receta_id):
+    if request.method == 'POST':
+        nuevo_nombre = request.form.get('nombre')
+        nuevos_ingredientes = request.form.getlist('ingredientes')
+        nuevos_pasos = request.form.getlist('pasos')
+        if not nuevos_ingredientes:
+            nuevos_ingredientes = []
+        if not nuevos_pasos:
+            nuevos_pasos = []
+        mensaje = actualizar_receta(receta_id, nuevo_nombre or None, nuevos_ingredientes or None, nuevos_pasos or None)
+        flash(mensaje)
+        return redirect(url_for('index'))
+    
+    receta, _ = buscar_receta(receta_id)
+    if receta:
+        return render_template('actualizar.html', receta=receta, receta_id=receta_id)
+    else:
+        flash('Receta no encontrada.')
+        return redirect(url_for('index'))
+
+@app.route('/eliminar/<receta_id>')
+def eliminar(receta_id):
+    mensaje = eliminar_receta(receta_id)
+    flash(mensaje)
+    return redirect(url_for('index'))
+
+@app.route('/buscar', methods=['GET', 'POST'])
+def buscar():
+    if request.method == 'POST':
+        receta_id = request.form['receta_id']
+        receta, ingredientes_pasos = buscar_receta(receta_id)
+        return render_template('buscar.html', receta=receta, ingredientes_pasos=ingredientes_pasos)
+    return render_template('buscar.html', receta=None, ingredientes_pasos=[])
+
+if __name__ == "__main__":
+    app.run(debug=True)
+Archivos HTML en templates/
+templates/index.html:
+
+html
+Copiar código
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recetas</title>
+</head>
+<body>
+    <h1>Recetas Disponibles</h1>
+    <ul>
+        {% for receta_id, nombre in recetas %}
+            <li>ID: {{ receta_id }}, Nombre: {{ nombre }} 
+                <a href="{{ url_for('actualizar', receta_id=receta_id) }}">Actualizar</a>
+                <a href="{{ url_for('eliminar', receta_id=receta_id) }}">Eliminar</a>
+            </li>
+        {% endfor %}
+    </ul>
+    <a href="{{ url_for('agregar') }}">Agregar Nueva Receta</a>
+    <a href="{{ url_for('buscar') }}">Buscar Receta</a>
+</body>
+</html>
+templates/agregar.html:
+
+html
+Copiar código
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agregar Receta</title>
+</head>
+<body>
+    <h1>Agregar Nueva Receta</h1>
+    <form method="post">
+        <label for="nombre">Nombre:</label>
+        <input type="text" id="nombre" name="nombre" required>
+        <br>
+        <label for="ingredientes">Ingredientes (separados por comas):</label>
+        <input type="text" id="ingredientes" name="ingredientes">
+        <br>
+        <label for="pasos">Pasos (separados por comas):</label>
+        <input type="text" id="pasos" name="pasos">
+        <br>
+        <button type="submit">Agregar Receta</button>
+    </form>
+    <a href="{{ url_for('index') }}">Volver al listado</a>
+</body>
+</html>
+templates/actualizar.html:
+
+html
+Copiar código
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Actualizar Receta</title>
+</head>
+<body>
+    <h1>Actualizar Receta</h1>
+    <form method="post">
+        <label for="nombre">Nuevo Nombre:</label>
+        <input type="text" id="nombre" name="nombre" value="{{ receta['nombre'] }}">
+        <br>
+        <label for="ingredientes">Nuevos Ingredientes (separados por comas):</label>
+        <input type="text" id="ingredientes" name="ingredientes" value="{{ receta['ingredientes']|join(',') }}">
+        <br>
+        <label for="pasos">Nuevos Pasos (separados por comas):</label>
+        <input type="text" id="pasos" name="pasos" value="{{ receta['pasos']|join(',') }}">
+        <br>
+        <button type="submit">Actualizar Receta</button>
+    </form>
+    <a href="{{ url_for('index') }}">Volver al listado</a>
+</body>
+</html>
+templates/buscar.html:
+
+html
+Copiar código
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buscar Receta</title>
+</head>
+<body>
+    <h1>Buscar Receta</h1>
+    <form method="post">
+        <label for="receta_id">ID de la Receta:</label>
+        <input type="text" id="receta_id" name="receta_id">
+        <button type="submit">Buscar</button>
+    </form>
+
+    {% if receta %}
+        <h2>Receta Encontrada</h2>
+        <p>Nombre: {{ receta['nombre'] }}</p>
+        <h3>Ingredientes y Pasos:</h3>
+        <ul>
+            {% for ingrediente, paso in ingredientes_pasos %}
+                <li>Ingrediente: {{ ingrediente }} - Paso: {{ paso }}</li>
+            {% endfor %}
+        </ul>
+    {% elif receta is not none %}
+        <p>Receta no encontrada.</p>
+    {% endif %}
+    
+    <a href="{{ url_for('index') }}">Volver al listado</a>
+</body>
+</html>
+requirements.txt
+txt
+Copiar código
+Flask
+redis
+Instrucciones de uso
+Instala las dependencias:
+
+bash
+Copiar código
+pip install -r requirements.txt
+Ejecuta la aplicación:
+
+bash
+Copiar código
+python app.py
