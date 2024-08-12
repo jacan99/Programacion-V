@@ -1,0 +1,57 @@
+Semana 2
+
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, relationship
+
+# Configuración de la base de datos
+DATABASE_URL = "mariadb+mariadbconnector://user:password@localhost/libro_recetas_db"
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# Definición de los modelos
+class Receta(Base):
+    __tablename__ = "recetas"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    nombre = Column(String(255), nullable=False)
+    ingredientes_pasos = relationship("IngredientePaso", back_populates="receta")
+
+class IngredientePaso(Base):
+    __tablename__ = "ingredientes_pasos"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    receta_id = Column(Integer, ForeignKey("recetas.id"))
+    ingrediente = Column(String(255))
+    paso = Column(String(255))
+    receta = relationship("Receta", back_populates="ingredientes_pasos")
+
+# Función para agregar nueva receta
+def agregar_receta(nombre, ingredientes, pasos):
+    db = SessionLocal()
+    try:
+        nueva_receta = Receta(nombre=nombre)
+        db.add(nueva_receta)
+        db.commit()  # Para que se genere el ID de la receta
+        db.refresh(nueva_receta)
+        
+        for ingrediente in ingredientes:
+            ingrediente = ingrediente.strip()
+            if ingrediente:
+                nuevo_ingrediente = IngredientePaso(receta_id=nueva_receta.id, ingrediente=ingrediente)
+                db.add(nuevo_ingrediente)
+        
+        for paso in pasos:
+            paso = paso.strip()
+            if paso:
+                nuevo_paso = IngredientePaso(receta_id=nueva_receta.id, paso=paso)
+                db.add(nuevo_paso)
+        
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Error al agregar la receta: {e}")
+    finally:
+        db.close()
