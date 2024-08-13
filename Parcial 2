@@ -1,0 +1,33 @@
+from flask import Flask, jsonify, request
+import pandas as pd
+
+app = Flask(__name__)
+
+# Cargar datos desde el archivo CSV
+data_file = 'measles_vaccination_panam.csv'
+data = pd.read_csv(data_file)
+
+# Convertir los datos a un formato JSON adecuado
+def convert_to_json(df):
+    return df.to_dict(orient='records')
+
+@app.route('/api/vaccination', methods=['GET'])
+def get_vaccination_data():
+    # Filtrar datos si hay parámetros en la consulta
+    country = request.args.get('country')
+    if country:
+        filtered_data = data[data['Country'] == country]
+    else:
+        filtered_data = data
+
+    # Convertir los datos a JSON y devolverlos
+    return jsonify(convert_to_json(filtered_data))
+
+@app.route('/api/vaccination/<int:year>', methods=['GET'])
+def get_vaccination_by_year(year):
+    # Filtrar datos por año
+    filtered_data = data[data['Year'] == year]
+    return jsonify(convert_to_json(filtered_data))
+
+if __name__ == '__main__':
+    app.run(debug=True)
