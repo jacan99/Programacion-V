@@ -1,0 +1,81 @@
+import os
+import json
+
+FILE_PATH = "budget_records.json"
+
+def load_data():
+    if not os.path.exists(FILE_PATH):
+        return {}
+    with open(FILE_PATH, "r") as file:
+        return json.load(file)
+
+def save_data(data):
+    with open(FILE_PATH, "w") as file:
+        json.dump(data, file, indent=4)
+
+def display_menu():
+    print("\n--- Sistema de Registro de Presupuesto ---")
+    print("1. Registrar artículo")
+    print("2. Buscar artículo")
+    print("3. Editar artículo")
+    print("4. Eliminar artículo")
+    print("5. Salir")
+    choice = input("Seleccione una opción (1-5): ")
+    return choice
+
+def register_item(data):
+    name = input("Nombre del artículo: ")
+    amount = float(input("Cantidad: "))
+    if name in data:
+        print("El artículo ya existe.")
+    else:
+        data[name] = amount
+        print("Artículo registrado exitosamente.")
+
+def search_item(data):
+    name = input("Nombre del artículo a buscar: ")
+    if name in data:
+        print(f"{name}: {data[name]}")
+    else:
+        print("Artículo no encontrado.")
+
+def edit_item(data):
+    name = input("Nombre del artículo a editar: ")
+    if name in data:
+        new_amount = float(input("Nueva cantidad: "))
+        data[name] = new_amount
+        print("Artículo actualizado exitosamente.")
+    else:
+        print("Artículo no encontrado.")
+
+def delete_item(data):
+    name = input("Nombre del artículo a eliminar: ")
+    if name in data:
+        del data[name]
+        print("Artículo eliminado exitosamente.")
+    else:
+        print("Artículo no encontrado.")
+
+def main():
+    data = load_data()
+
+    while True:
+        choice = display_menu()
+        
+        if choice == '1':
+            register_item(data)
+        elif choice == '2':
+            search_item(data)
+        elif choice == '3':
+            edit_item(data)
+        elif choice == '4':
+            delete_item(data)
+        elif choice == '5':
+            save_data(data)
+            print("Datos guardados. Salida del programa.")
+            break
+        else:
+            print("Opción no válida. Inténtelo de nuevo.")
+
+if __name__ == "__main__":
+    main()
