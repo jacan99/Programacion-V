@@ -1,0 +1,214 @@
+from flask import Flask, request, render_template_string, redirect, url_for, jsonify
+import requests
+from flask_mail import Mail, Message
+from celery import Celery
+
+# Configuración de Flask
+app = Flask(__name__)
+app.config.update(
+    CELERY_BROKER_URL='redis://localhost:6379/0',
+    CELERY_RESULT_BACKEND='redis://localhost:6379/0',
+    MAIL_SERVER='smtp.example.com',  
+    MAIL_PORT=587, 
+    MAIL_USERNAME='your_email@example.com',
+    MAIL_PASSWORD='your_password',
+    MAIL_USE_TLS=True,
+    MAIL_USE_SSL=False
+)
+
+# Configuración de Celery
+celery = Celery(
+    app.import_name,
+    backend=app.config['CELERY_RESULT_BACKEND'],
+    broker=app.config['CELERY_BROKER_URL']
+)
+celery.conf.update(app.config)
+
+# Configuración de Flask-Mail
+mail = Mail(app)
+
+# URL base de la API REST
+API_BASE_URL = 'http://api.example.com/api/recetas'
+
+# Plantillas HTML
+index_html = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recetas</title>
+</head>
+<body>
+    <h1>Bienvenido a la aplicación de recetas</h1>
+    <nav>
+        <a href="{{ url_for('ver_listado_recetas') }}">Ver Listado de Recetas</a>
+        <a href="{{ url_for('agregar_receta') }}">Agregar Nueva Receta</a>
+    </nav>
+</body>
+</html>
+"""
+
+listado_recetas_html = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Listado de Recetas</title>
+</head>
+<body>
+    <h1>Listado de Recetas</h1>
+    <ul>
+        {% for receta in recetas %}
+            <li>
+                <a href="{{ url_for('buscar_ingredientes_pasos', receta_id=receta.id) }}">{{ receta.nombre }}</a>
+                <form action="{{ url_for('eliminar_receta', receta_id=receta.id) }}" method="post" style="display:inline;">
+                    <button type="submit">Eliminar</button>
+                </form>
+                <a href="{{ url_for('actualizar_receta', receta_id=receta.id) }}">Actualizar</a>
+            </li>
+        {% endfor %}
+    </ul>
+    <a href="{{ url_for('index') }}">Volver al inicio</a>
+</body>
+</html>
+"""
+
+ver_receta_html = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ver Receta</title>
+</head>
+<body>
+    <h1>{{ nombre }}</h1>
+    <h2>Ingredientes</h2>
+    <ul>
+        {% for ingrediente in ingredientes %}
+            <li>{{ ingrediente }}</li>
+        {% endfor %}
+    </ul>
+    <h2>Pasos</h2>
+    <ul>
+        {% for paso in pasos %}
+            <li>{{ paso }}</li>
+        {% endfor %}
+    </ul>
+    <a href="{{ url_for('ver_listado_recetas') }}">Volver al listado</a>
+</body>
+</html>
+"""
+
+agregar_receta_html = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agregar Receta</title>
+</head>
+<body>
+    <h1>Agregar Nueva Receta</h1>
+    <form action="{{ url_for('agregar_receta') }}" method="post">
+        <label for="nombre">Nombre:</label>
+        <input type="text" id="nombre" name="nombre" required>
+        <br>
+        <label for="ingredientes">Ingredientes:</label>
+        <input type="text" name="ingredientes" placeholder="Ingrediente">
+        <input type="text" name="ingredientes" placeholder="Ingrediente">
+        <input type="text" name="ingredientes" placeholder="Ingrediente">
+        <br>
+        <label for="pasos">Pasos:</label>
+        <input type="text" name="pasos" placeholder="Paso">
+        <input type="text" name="pasos" placeholder="Paso">
+        <input type="text" name="pasos" placeholder="Paso">
+        <br>
+        <button type="submit">Agregar Receta</button>
+    </form>
+    <a href="{{ url_for('index') }}">Volver al inicio</a>
+</body>
+</html>
+"""
+
+actualizar_receta_html = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Actualizar Receta</title>
+</head>
+<body>
+    <h1>Actualizar Receta</h1>
+    <form action="{{ url_for('actualizar_receta', receta_id=receta_id) }}" method="post">
+        <label for="nombre">Nombre:</label>
+        <input type="text" id="nombre" name="nombre" value="{{ nombre }}" required>
+        <br>
+        <label for="ingredientes">Ingredientes:</label>
+        <input type="text" name="ingredientes" value="{% for ingrediente in ingredientes %}{{ ingrediente }}{% endfor %}" placeholder="Ingrediente">
+        <br>
+        <label for="pasos">Pasos:</label>
+        <input type="text" name="pasos" value="{% for paso in pasos %}{{ paso }}{% endfor %}" placeholder="Paso">
+        <br>
+        <button type="submit">Actualizar Receta</button>
+    </form>
+    <a href="{{ url_for('index') }}">Volver al inicio</a>
+</body>
+</html>
+"""
+
+@app.route('/')
+def index():
+    return render_template_string(index_html)
+
+@app.route('/recetas', methods=['GET'])
+def ver_listado_recetas():
+    response = requests.get(API_BASE_URL)
+    recetas = response.json()
+    return render_template_string(listado_recetas_html, recetas=recetas)
+
+@app.route('/receta/<receta_id>', methods=['GET'])
+def buscar_ingredientes_pasos(receta_id):
+    response = requests.get(f"{API_BASE_URL}/{receta_id}")
+    if response.status_code != 200:
+        return "Receta no encontrada", 404
+
+    receta = response.json()
+    return render_template_string(ver_receta_html, nombre=receta['nombre'], ingredientes=receta['ingredientes'], pasos=receta['pasos'])
+
+@app.route('/agregar', methods=['GET', 'POST'])
+def agregar_receta():
+    if request.method == 'POST':
+        nombre = request.form.get('nombre')
+        ingredientes = request.form.getlist('ingredientes')
+        pasos = request.form.getlist('pasos')
+
+        data = {
+            'nombre': nombre,
+            'ingredientes': [i for i in ingredientes if i],
+            'pasos': [p for p in pasos if p]
+        }
+
+        response = requests.post(API_BASE_URL, json=data)
+        if response.status_code == 201:
+            # Enviar correo electrónico de notificación asíncrono
+            enviar_correo_asincrono.delay(nombre)
+            return redirect(url_for('ver_listado_recetas'))
+        else:
+            return "Error al agregar receta", 500
+
+    return render_template_string(agregar_receta_html)
+
+@app.route('/actualizar/<receta_id>', methods=['GET', 'POST'])
+def actualizar_receta(receta_id):
+    if request.method == 'POST':
+        nombre = request.form.get('nombre')
+        ingredientes = request.form.getlist('ingredientes')
+        pasos = request.form.getlist('pasos')
+
+        data = {
+            'nombre': nombre,
+            'ingredientes': [i for i in ingredientes if
